@@ -59,6 +59,12 @@ Input Adapter -> Context Builder -> LLM Reasoner -> Validation Engine
 python main.py
 ```
 
+## Demo Output Notes
+
+- You should see one or more `- action=...` lines as final output.
+- Repeated `INFO:life_os_agent.audit:audit_event` lines from older builds are audit logs, not runtime failures.
+- Current demo defaults to warning-level logging to keep the CLI output clean.
+
 ## Run Tests
 
 ```bash

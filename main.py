@@ -30,7 +30,7 @@ def build_orchestrator() -> LifeOSOrchestrator:
 
 def main() -> None:
     """Run a simple CLI demonstration cycle."""
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s:%(name)s:%(message)s")
     orchestrator = build_orchestrator()
     input_adapter = InputAdapter()
 

@@ -24,4 +24,4 @@ class AuditStore:
             "payload": payload,
         }
         self.events.append(entry)
-        logger.info("audit_event", extra=entry)
+        logger.debug("audit_event %s", entry)
