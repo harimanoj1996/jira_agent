@@ -28,7 +28,7 @@ Input Adapter -> Context Builder -> LLM Reasoner -> Validation Engine
 
 - `life_os_agent/input_layer.py`: text and voice-ready input abstraction.
 - `life_os_agent/context_builder.py`: Jira context retrieval (issue references, workload, activity).
-- `life_os_agent/llm_module.py`: LLM intent/summarization/action proposal interface.
+- `life_os_agent/llm_module.py`: LLM intent/summarization/action proposal interface with mock and active OpenAI-compatible gateway support.
 - `life_os_agent/models.py`: strict typed schema models for system messages.
 - `life_os_agent/validation.py`: deterministic validation and risk policy enforcement.
 - `life_os_agent/hitl.py`: confirmation flow with YES / NO / EDIT support.
@@ -64,6 +64,21 @@ python main.py
 - You should see one or more `- action=...` lines as final output.
 - Repeated `INFO:life_os_agent.audit:audit_event` lines from older builds are audit logs, not runtime failures.
 - Current demo defaults to warning-level logging to keep the CLI output clean.
+
+## Active LLM Setup
+
+By default, the demo uses a deterministic mock model. To connect to an active OpenAI-compatible LLM endpoint:
+
+```bash
+export LIFE_OS_LLM_MODE=active
+export LIFE_OS_LLM_API_KEY=your_api_key
+export LIFE_OS_LLM_MODEL=gpt-4o-mini
+# optional for compatible non-OpenAI hosts
+export LIFE_OS_LLM_BASE_URL=https://api.openai.com
+python main.py
+```
+
+If `LIFE_OS_LLM_MODE=active` is set and no API key is provided, startup fails fast with a clear error.
 
 ## Run Tests
 

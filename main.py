@@ -10,7 +10,7 @@ from life_os_agent.execution import JiraExecutor
 from life_os_agent.hitl import HumanApprovalGateway, HumanInTheLoop
 from life_os_agent.input_layer import InputAdapter
 from life_os_agent.jira_client import JiraClient, JiraClientConfig
-from life_os_agent.llm_module import LLMReasoner, MockLLMGateway
+from life_os_agent.llm_module import LLMReasoner, build_gateway_from_env
 from life_os_agent.orchestrator import LifeOSOrchestrator
 from life_os_agent.validation import PolicyConfig, ValidationEngine
 
@@ -20,7 +20,7 @@ def build_orchestrator() -> LifeOSOrchestrator:
     jira_client = JiraClient(config=JiraClientConfig())
     return LifeOSOrchestrator(
         context_builder=ContextBuilder(jira_client=jira_client),
-        llm_reasoner=LLMReasoner(gateway=MockLLMGateway()),
+        llm_reasoner=LLMReasoner(gateway=build_gateway_from_env()),
         validation_engine=ValidationEngine(config=PolicyConfig()),
         human_loop=HumanInTheLoop(gateway=HumanApprovalGateway()),
         executor=JiraExecutor(jira_client=jira_client),

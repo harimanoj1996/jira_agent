@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
+from urllib import error, request
 
 from .models import ActionType, JiraContext, LLMDecision, ProposedAction, UserInput
 
@@ -44,6 +46,61 @@ class MockLLMGateway:
 
 
 @dataclass(slots=True)
+class OpenAICompatibleGateway:
+    """OpenAI-compatible HTTP gateway for active model integration.
+
+    Expects a chat-completions-compatible endpoint that returns
+    `choices[0].message.content`.
+    """
+
+    api_key: str
+    model: str
+    base_url: str = "https://api.openai.com"
+    timeout_seconds: int = 30
+
+    def complete(self, prompt: str) -> str:
+        """Call an active LLM endpoint and return assistant content."""
+        payload = {
+            "model": self.model,
+            "temperature": 0,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Return only JSON that matches the requested schema.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+        }
+        body = json.dumps(payload).encode("utf-8")
+        req = request.Request(
+            url=f"{self.base_url.rstrip('/')}/v1/chat/completions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=self.timeout_seconds) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"LLM HTTP error {exc.code}: {details}") from exc
+        except error.URLError as exc:
+            raise RuntimeError(f"LLM connection failed: {exc}") from exc
+
+        choices = data.get("choices", [])
+        if not choices:
+            raise RuntimeError("LLM response missing choices")
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("LLM response missing assistant content")
+        return content.strip()
+
+
+@dataclass(slots=True)
 class LLMReasoner:
     """Produces structured suggestions while delegating control to policy layers."""
 
@@ -56,27 +113,37 @@ class LLMReasoner:
         return self._parse_decision(raw_output)
 
     def _build_prompt(self, user_input: UserInput, context: JiraContext) -> str:
+        schema = {
+            "intent": "string",
+            "summary": "string",
+            "proposed_actions": [
+                {
+                    "type": "create_issue | update_issue | transition_issue | summarize | flag_risk",
+                    "issue_key": "string or null",
+                    "fields": {},
+                    "reason": "string",
+                    "confidence": 0.0,
+                    "risk_flags": [],
+                }
+            ],
+            "requires_confirmation": True,
+            "confidence": 0.0,
+        }
         return (
-            "You are a Jira decision-support model. Output ONLY JSON matching schema."
-            f"\nUser input: {user_input.text}"
-            f"\nInput source: {user_input.source.value}, confidence={user_input.confidence}"
-            f"\nIssue details: {context.issue_details}"
-            f"\nWorkload summary: {context.workload_summary}"
-            f"\nRecent activity: {context.recent_activity}"
+            "You are a bounded Jira decision-support reasoner. "
+            "Never execute tools or APIs. "
+            "Return ONLY valid JSON, no markdown, no prose.\n"
+            f"Required schema: {json.dumps(schema)}\n"
+            f"User input: {user_input.text}\n"
+            f"Input source: {user_input.source.value}, confidence={user_input.confidence}\n"
+            f"Issue details: {context.issue_details}\n"
+            f"Workload summary: {context.workload_summary}\n"
+            f"Recent activity: {context.recent_activity}"
         )
 
     def _parse_decision(self, raw_output: str) -> LLMDecision:
         payload = json.loads(raw_output)
-        required_keys = {
-            "intent",
-            "summary",
-            "proposed_actions",
-            "requires_confirmation",
-            "confidence",
-        }
-        missing = required_keys.difference(payload)
-        if missing:
-            raise ValueError(f"LLM output missing required fields: {sorted(missing)}")
+        self._validate_payload_keys(payload)
 
         actions: list[ProposedAction] = []
         for action in payload["proposed_actions"]:
@@ -98,3 +165,38 @@ class LLMReasoner:
             requires_confirmation=bool(payload["requires_confirmation"]),
             confidence=float(payload["confidence"]),
         )
+
+    @staticmethod
+    def _validate_payload_keys(payload: dict[str, Any]) -> None:
+        required_keys = {
+            "intent",
+            "summary",
+            "proposed_actions",
+            "requires_confirmation",
+            "confidence",
+        }
+        missing = required_keys.difference(payload)
+        if missing:
+            raise ValueError(f"LLM output missing required fields: {sorted(missing)}")
+
+
+def build_gateway_from_env() -> LLMGateway:
+    """Build active gateway when configured, otherwise deterministic mock.
+
+    Environment variables:
+    - LIFE_OS_LLM_MODE: `mock` (default) or `active`
+    - LIFE_OS_LLM_API_KEY: API token for active mode
+    - LIFE_OS_LLM_MODEL: model name (default `gpt-4o-mini`)
+    - LIFE_OS_LLM_BASE_URL: compatible API base URL (default OpenAI)
+    """
+    mode = os.getenv("LIFE_OS_LLM_MODE", "mock").strip().lower()
+    if mode != "active":
+        return MockLLMGateway()
+
+    api_key = os.getenv("LIFE_OS_LLM_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("LIFE_OS_LLM_API_KEY is required when LIFE_OS_LLM_MODE=active")
+
+    model = os.getenv("LIFE_OS_LLM_MODEL", "gpt-4o-mini").strip()
+    base_url = os.getenv("LIFE_OS_LLM_BASE_URL", "https://api.openai.com").strip()
+    return OpenAICompatibleGateway(api_key=api_key, model=model, base_url=base_url)
