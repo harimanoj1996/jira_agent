@@ -67,7 +67,31 @@ python main.py
 
 ## Active LLM Setup
 
-By default, the demo uses a deterministic mock model. To connect to an active OpenAI-compatible LLM endpoint:
+By default, the demo uses a deterministic mock model. To connect to an active OpenAI-compatible LLM endpoint, use the commands for your shell.
+
+### Windows PowerShell
+
+```powershell
+$env:LIFE_OS_LLM_MODE = "active"
+$env:LIFE_OS_LLM_API_KEY = "your_api_key"
+$env:LIFE_OS_LLM_MODEL = "gpt-4o-mini"
+# optional for compatible non-OpenAI hosts
+$env:LIFE_OS_LLM_BASE_URL = "https://api.openai.com"
+python main.py
+```
+
+### Windows Command Prompt (cmd.exe)
+
+```bat
+set LIFE_OS_LLM_MODE=active
+set LIFE_OS_LLM_API_KEY=your_api_key
+set LIFE_OS_LLM_MODEL=gpt-4o-mini
+REM optional for compatible non-OpenAI hosts
+set LIFE_OS_LLM_BASE_URL=https://api.openai.com
+python main.py
+```
+
+### Linux/macOS (bash/zsh)
 
 ```bash
 export LIFE_OS_LLM_MODE=active
