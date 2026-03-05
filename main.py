@@ -22,10 +22,18 @@ LLM_CONFIG = LLMRuntimeConfig(
     base_url="https://api.openai.com",
 )
 
+JIRA_CONFIG = JiraClientConfig(
+    mode="mock",  # change to "active" to connect to Atlassian Cloud
+    base_url="https://your-domain.atlassian.net",
+    email="your_email@company.com",
+    api_token="your_api_token",
+    project_key="LIFE",
+)
+
 
 def build_orchestrator() -> LifeOSOrchestrator:
     """Wire all modules with deterministic defaults."""
-    jira_client = JiraClient(config=JiraClientConfig())
+    jira_client = JiraClient(config=JIRA_CONFIG)
     return LifeOSOrchestrator(
         context_builder=ContextBuilder(jira_client=jira_client),
         llm_reasoner=LLMReasoner(gateway=build_gateway(LLM_CONFIG)),
@@ -41,6 +49,9 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s:%(name)s:%(message)s")
     orchestrator = build_orchestrator()
     input_adapter = InputAdapter()
+
+    jira_status = orchestrator.context_builder.jira_client.check_connection()
+    print(f"Jira connection: {jira_status}")
 
     user_text = input("Life OS Agent > ")
     user_input = input_adapter.from_text(user_text)

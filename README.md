@@ -59,6 +59,8 @@ Input Adapter -> Context Builder -> LLM Reasoner -> Validation Engine
 python main.py
 ```
 
+The app now prints Jira connection status at startup. In `main.py`, set `JIRA_CONFIG.mode="active"` and provide real `base_url`, `email`, `api_token`, and `project_key` to fetch live Jira context (`issue details`, `workload summary`, and `recent activity`).
+
 ## Demo Output Notes
 
 - You should see one or more `- action=...` lines as final output.
@@ -88,7 +90,5 @@ python -m pytest
 
 ## Future Extensions
 
-- replace `MockLLMGateway` with production provider adapter
 - plug phone/SMS confirmation backend into `HumanApprovalGateway`
-- swap in real Jira REST requests in `JiraClient`
 - persist audit events into warehouse/SIEM
