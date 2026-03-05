@@ -59,7 +59,7 @@ class JiraClient:
             )
             data = self._with_retry(
                 "get_workload_summary",
-                lambda: self._request_json("GET", f"/rest/api/3/search?{query}"),
+                lambda: self._request_json("GET", f"/rest/api/3/search/jql?{query}"),
             )
             issues = data.get("issues", [])
             open_count = sum(

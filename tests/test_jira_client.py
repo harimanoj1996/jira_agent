@@ -32,7 +32,7 @@ def test_get_workload_summary_active_uses_rest(monkeypatch: pytest.MonkeyPatch) 
 
     def fake_request(method: str, path: str, payload=None):
         del method, payload
-        if path.startswith("/rest/api/3/search?"):
+        if path.startswith("/rest/api/3/search/jql?"):
             return {
                 "issues": [
                     {"fields": {"status": {"name": "In Progress"}}},
