@@ -10,9 +10,17 @@ from life_os_agent.execution import JiraExecutor
 from life_os_agent.hitl import HumanApprovalGateway, HumanInTheLoop
 from life_os_agent.input_layer import InputAdapter
 from life_os_agent.jira_client import JiraClient, JiraClientConfig
-from life_os_agent.llm_module import LLMReasoner, build_gateway_from_env
+from life_os_agent.llm_module import LLMReasoner, LLMRuntimeConfig, build_gateway
 from life_os_agent.orchestrator import LifeOSOrchestrator
 from life_os_agent.validation import PolicyConfig, ValidationEngine
+
+# Python-native configuration (no environment variables required)
+LLM_CONFIG = LLMRuntimeConfig(
+    mode="mock",  # change to "active" to connect to a live LLM
+    api_key="",  # required only when mode="active"
+    model="gpt-4o-mini",
+    base_url="https://api.openai.com",
+)
 
 
 def build_orchestrator() -> LifeOSOrchestrator:
@@ -20,7 +28,7 @@ def build_orchestrator() -> LifeOSOrchestrator:
     jira_client = JiraClient(config=JiraClientConfig())
     return LifeOSOrchestrator(
         context_builder=ContextBuilder(jira_client=jira_client),
-        llm_reasoner=LLMReasoner(gateway=build_gateway_from_env()),
+        llm_reasoner=LLMReasoner(gateway=build_gateway(LLM_CONFIG)),
         validation_engine=ValidationEngine(config=PolicyConfig()),
         human_loop=HumanInTheLoop(gateway=HumanApprovalGateway()),
         executor=JiraExecutor(jira_client=jira_client),

@@ -67,42 +67,18 @@ python main.py
 
 ## Active LLM Setup
 
-By default, the demo uses a deterministic mock model. To connect to an active OpenAI-compatible LLM endpoint, use the commands for your shell.
+By default, the demo uses a deterministic mock model and now configures LLM access via **Python variables** in `main.py`.
 
-### Windows PowerShell
-
-```powershell
-$env:LIFE_OS_LLM_MODE = "active"
-$env:LIFE_OS_LLM_API_KEY = "your_api_key"
-$env:LIFE_OS_LLM_MODEL = "gpt-4o-mini"
-# optional for compatible non-OpenAI hosts
-$env:LIFE_OS_LLM_BASE_URL = "https://api.openai.com"
-python main.py
+```python
+LLM_CONFIG = LLMRuntimeConfig(
+    mode="mock",      # or "active"
+    api_key="",       # required when mode="active"
+    model="gpt-4o-mini",
+    base_url="https://api.openai.com",
+)
 ```
 
-### Windows Command Prompt (cmd.exe)
-
-```bat
-set LIFE_OS_LLM_MODE=active
-set LIFE_OS_LLM_API_KEY=your_api_key
-set LIFE_OS_LLM_MODEL=gpt-4o-mini
-REM optional for compatible non-OpenAI hosts
-set LIFE_OS_LLM_BASE_URL=https://api.openai.com
-python main.py
-```
-
-### Linux/macOS (bash/zsh)
-
-```bash
-export LIFE_OS_LLM_MODE=active
-export LIFE_OS_LLM_API_KEY=your_api_key
-export LIFE_OS_LLM_MODEL=gpt-4o-mini
-# optional for compatible non-OpenAI hosts
-export LIFE_OS_LLM_BASE_URL=https://api.openai.com
-python main.py
-```
-
-If `LIFE_OS_LLM_MODE=active` is set and no API key is provided, startup fails fast with a clear error.
+To use a live model, set `mode="active"` and provide `api_key` directly in `LLM_CONFIG`.
 
 ## Run Tests
 

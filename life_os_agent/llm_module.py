@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib import error, request
@@ -16,6 +15,16 @@ class LLMGateway(Protocol):
 
     def complete(self, prompt: str) -> str:
         """Return raw model output text."""
+
+
+@dataclass(slots=True)
+class LLMRuntimeConfig:
+    """Python-native runtime settings for LLM gateway selection."""
+
+    mode: str = "mock"
+    api_key: str = ""
+    model: str = "gpt-4o-mini"
+    base_url: str = "https://api.openai.com"
 
 
 @dataclass(slots=True)
@@ -47,11 +56,7 @@ class MockLLMGateway:
 
 @dataclass(slots=True)
 class OpenAICompatibleGateway:
-    """OpenAI-compatible HTTP gateway for active model integration.
-
-    Expects a chat-completions-compatible endpoint that returns
-    `choices[0].message.content`.
-    """
+    """OpenAI-compatible HTTP gateway for active model integration."""
 
     api_key: str
     model: str
@@ -180,23 +185,16 @@ class LLMReasoner:
             raise ValueError(f"LLM output missing required fields: {sorted(missing)}")
 
 
-def build_gateway_from_env() -> LLMGateway:
-    """Build active gateway when configured, otherwise deterministic mock.
-
-    Environment variables:
-    - LIFE_OS_LLM_MODE: `mock` (default) or `active`
-    - LIFE_OS_LLM_API_KEY: API token for active mode
-    - LIFE_OS_LLM_MODEL: model name (default `gpt-4o-mini`)
-    - LIFE_OS_LLM_BASE_URL: compatible API base URL (default OpenAI)
-    """
-    mode = os.getenv("LIFE_OS_LLM_MODE", "mock").strip().lower()
+def build_gateway(config: LLMRuntimeConfig | None = None) -> LLMGateway:
+    """Build gateway from Python runtime config, no environment variables required."""
+    cfg = config or LLMRuntimeConfig()
+    mode = cfg.mode.strip().lower()
     if mode != "active":
         return MockLLMGateway()
-
-    api_key = os.getenv("LIFE_OS_LLM_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("LIFE_OS_LLM_API_KEY is required when LIFE_OS_LLM_MODE=active")
-
-    model = os.getenv("LIFE_OS_LLM_MODEL", "gpt-4o-mini").strip()
-    base_url = os.getenv("LIFE_OS_LLM_BASE_URL", "https://api.openai.com").strip()
-    return OpenAICompatibleGateway(api_key=api_key, model=model, base_url=base_url)
+    if not cfg.api_key.strip():
+        raise RuntimeError("LLMRuntimeConfig.api_key is required when mode='active'")
+    return OpenAICompatibleGateway(
+        api_key=cfg.api_key.strip(),
+        model=cfg.model.strip() or "gpt-4o-mini",
+        base_url=cfg.base_url.strip() or "https://api.openai.com",
+    )
