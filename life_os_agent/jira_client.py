@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 from urllib import error, parse, request
 
@@ -54,7 +55,7 @@ class JiraClient:
                 {
                     "jql": f"assignee = currentUser() AND project = {self.config.project_key} ORDER BY updated DESC",
                     "maxResults": 50,
-                    "fields": "status",
+                    "fields": "status,priority,duedate,updated,summary",
                 }
             )
             data = self._with_retry(
@@ -62,34 +63,46 @@ class JiraClient:
                 lambda: self._request_json("GET", f"/rest/api/3/search/jql?{query}"),
             )
             issues = data.get("issues", [])
-            open_count = sum(
-                1
-                for issue in issues
-                if issue.get("fields", {}).get("status", {}).get("name", "") not in {"Done", "Closed"}
-            )
-            return {
-                "open_issues": open_count,
-                "total_issues": len(issues),
-                "source": "atlassian_cloud",
-            }
+            return self._summarize_issues(issues=issues, source="atlassian_cloud")
 
-        open_count = sum(1 for issue in self._issues.values() if issue.get("status") != "Done")
-        return {"open_issues": open_count, "total_issues": len(self._issues), "source": "mock"}
+        issues = [
+            {
+                "key": key,
+                "fields": {
+                    "status": {"name": value.get("status", "To Do")},
+                    "priority": {"name": value.get("priority", "Medium")},
+                    "duedate": value.get("duedate"),
+                    "updated": value.get("updated"),
+                    "summary": value.get("summary", ""),
+                },
+            }
+            for key, value in self._issues.items()
+        ]
+        return self._summarize_issues(issues=issues, source="mock")
 
     def get_recent_activity(self) -> list[dict[str, Any]]:
         """Return recent activity events."""
         if self._is_active:
+            query = parse.urlencode(
+                {
+                    "jql": f"project = {self.config.project_key} ORDER BY updated DESC",
+                    "maxResults": 5,
+                    "fields": "status,updated,summary",
+                }
+            )
             data = self._with_retry(
                 "get_recent_activity",
-                lambda: self._request_json("GET", "/rest/api/3/myself"),
+                lambda: self._request_json("GET", f"/rest/api/3/search/jql?{query}"),
             )
             return [
                 {
-                    "event": "authenticated_user",
-                    "accountId": data.get("accountId"),
-                    "displayName": data.get("displayName"),
-                    "emailAddress": data.get("emailAddress"),
+                    "event": "issue_recently_updated",
+                    "issue_key": issue.get("key"),
+                    "summary": issue.get("fields", {}).get("summary"),
+                    "status": issue.get("fields", {}).get("status", {}).get("name"),
+                    "updated": issue.get("fields", {}).get("updated"),
                 }
+                for issue in data.get("issues", [])
             ]
         return self._activity[-10:]
 
@@ -127,7 +140,7 @@ class JiraClient:
     def _is_active(self) -> bool:
         return self.config.mode.strip().lower() == "active"
 
-    def _with_retry(self, op_name: str, operation: Any) -> dict[str, Any]:
+    def _with_retry(self, op_name: str, operation: Any) -> Any:
         last_exc: Exception | None = None
         for attempt in range(1, self.config.max_retries + 1):
             try:
@@ -227,3 +240,47 @@ class JiraClient:
         self._issues[issue_key]["status"] = status
         self._activity.append({"event": "transition", "issue_key": issue_key, "status": status})
         return self._issues[issue_key]
+
+    def _summarize_issues(self, issues: list[dict[str, Any]], source: str) -> dict[str, Any]:
+        status_counts: dict[str, int] = {}
+        priority_counts: dict[str, int] = {}
+        overdue_issues: list[str] = []
+        high_priority_open: list[str] = []
+
+        today = date.today()
+        for issue in issues:
+            key = issue.get("key", "UNKNOWN")
+            fields = issue.get("fields", {})
+
+            status = fields.get("status", {}).get("name", "Unknown")
+            priority = fields.get("priority", {}).get("name", "Unknown")
+            due_date = fields.get("duedate")
+
+            status_counts[status] = status_counts.get(status, 0) + 1
+            priority_counts[priority] = priority_counts.get(priority, 0) + 1
+
+            is_open = status not in {"Done", "Closed"}
+            if is_open and priority in {"Highest", "High", "Critical", "Blocker"}:
+                high_priority_open.append(key)
+
+            if due_date and is_open:
+                try:
+                    if date.fromisoformat(due_date) < today:
+                        overdue_issues.append(key)
+                except ValueError:
+                    pass
+
+        total_issues = len(issues)
+        open_issues = total_issues - status_counts.get("Done", 0) - status_counts.get("Closed", 0)
+
+        return {
+            "open_issues": open_issues,
+            "total_issues": total_issues,
+            "source": source,
+            "status_counts": status_counts,
+            "priority_counts": priority_counts,
+            "overdue_count": len(overdue_issues),
+            "overdue_issue_keys": overdue_issues[:5],
+            "high_priority_open_count": len(high_priority_open),
+            "high_priority_open_keys": high_priority_open[:5],
+        }

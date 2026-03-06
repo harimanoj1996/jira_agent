@@ -59,7 +59,9 @@ Input Adapter -> Context Builder -> LLM Reasoner -> Validation Engine
 python main.py
 ```
 
-The app now prints Jira connection status at startup. In `main.py`, set `JIRA_CONFIG.mode="active"` and provide real `base_url`, `email`, `api_token`, and `project_key` to fetch live Jira context (`issue details`, `workload summary`, and `recent activity`).
+The app now prints Jira connection status at startup. In `main.py`, set `JIRA_CONFIG.mode="active"` and provide real `base_url`, `email`, `api_token`, and `project_key` to fetch live Jira context (`issue details`, enriched `workload summary`, and recent issue update activity).
+
+`get_workload_summary()` now includes deterministic project-state signals such as `status_counts`, `priority_counts`, `overdue_count`, and `high_priority_open_count` to improve LLM grounding beyond simple totals.
 
 ## Demo Output Notes
 
