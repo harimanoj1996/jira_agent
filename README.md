@@ -61,22 +61,19 @@ python main.py
 
 The app now prints Jira connection status at startup. In `main.py`, set `JIRA_CONFIG.mode="active"` and provide real `base_url`, `email`, `api_token`, `project_key`, and `board_id` to fetch live Jira sprint context (`issue details`, sprint JSON, and recent issue update activity).
 
-`get_workload_summary()` now returns a sprint-based structure under `sprints` plus `sprint_metrics`, `velocity`, `blockers`, and `alerts` to support sprint summaries, backlog refinement, and sprint planning workflows.
+`get_workload_summary()` now returns a sprint-based nested issue dictionary (`{sprint_name: {issue_key: {...}}}`) to support sprint summaries, backlog refinement, and sprint planning workflows.
 
 Example shape:
 
 ```json
 {
-  "sprints": {
-    "Sprint 1": {
-      "LO-32": {"status": "Backlog", "summary": "..."},
-      "LO-11": {"status": "Done"}
-    }
+  "Sprint 1": {
+    "LO-32": {"status": "Backlog", "summary": "...", "priority": "Medium"},
+    "LO-11": {"status": "Done", "summary": "..."}
   },
-  "sprint_metrics": {},
-  "velocity": {},
-  "blockers": [],
-  "alerts": []
+  "Sprint 2": {
+    "LO-41": {"status": "Done", "summary": "..."}
+  }
 }
 ```
 

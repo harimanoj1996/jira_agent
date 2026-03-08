@@ -19,7 +19,9 @@ def test_active_mode_requires_credentials() -> None:
         client._request_json("GET", "/rest/api/3/myself")
 
 
-def test_get_workload_summary_active_returns_sprint_json(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_workload_summary_active_returns_nested_sprint_issue_map(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = JiraClient(
         config=JiraClientConfig(
             mode="active",
@@ -47,10 +49,10 @@ def test_get_workload_summary_active_returns_sprint_json(monkeypatch: pytest.Mon
                         "key": "ABC-1",
                         "fields": {
                             "summary": "Login fix",
-                            "status": {"name": "In Progress"},
-                            "priority": {"name": "High"},
+                            "status": {"name": "Backlog"},
+                            "priority": {"name": "Medium"},
                             "assignee": {"displayName": "Alex"},
-                            "duedate": "2000-01-01",
+                            "duedate": "2030-01-01",
                         },
                     },
                     {
@@ -77,11 +79,10 @@ def test_get_workload_summary_active_returns_sprint_json(monkeypatch: pytest.Mon
     )
     result = client.get_workload_summary()
 
-    assert result["source"] == "atlassian_cloud"
-    assert "Sprint 1" in result["sprints"]
-    assert result["sprints"]["Sprint 1"]["ABC-1"]["status"] == "In Progress"
-    assert result["sprint_metrics"]["Sprint 1"]["done"] == 1
-    assert result["alerts"]
+    assert "Sprint 1" in result
+    assert result["Sprint 1"]["ABC-1"]["summary"] == "Login fix"
+    assert result["Sprint 1"]["ABC-1"]["status"] == "Backlog"
+    assert result["Sprint 1"]["ABC-2"]["status"] == "Done"
 
 
 def test_get_recent_activity_active_uses_issue_updates(monkeypatch: pytest.MonkeyPatch) -> None:
