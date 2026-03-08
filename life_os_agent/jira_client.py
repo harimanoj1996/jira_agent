@@ -23,6 +23,8 @@ class JiraClientConfig:
     email: str = "agent@example.com"
     api_token: str = "dummy-token"
     project_key: str = "LIFE"
+    board_id: int = 1
+    sprint_limit: int = 10
     account_id: str = ""
     max_retries: int = 3
     backoff_seconds: float = 0.2
@@ -49,36 +51,10 @@ class JiraClient:
         return self._issues.get(issue_key)
 
     def get_workload_summary(self) -> dict[str, Any]:
-        """Return workload snapshot from Jira or local mock."""
+        """Return sprint-oriented workload snapshot for LLM grounding."""
         if self._is_active:
-            query = parse.urlencode(
-                {
-                    "jql": f"assignee = currentUser() AND project = {self.config.project_key} ORDER BY updated DESC",
-                    "maxResults": 50,
-                    "fields": "status,priority,duedate,updated,summary",
-                }
-            )
-            data = self._with_retry(
-                "get_workload_summary",
-                lambda: self._request_json("GET", f"/rest/api/3/search/jql?{query}"),
-            )
-            issues = data.get("issues", [])
-            return self._summarize_issues(issues=issues, source="atlassian_cloud")
-
-        issues = [
-            {
-                "key": key,
-                "fields": {
-                    "status": {"name": value.get("status", "To Do")},
-                    "priority": {"name": value.get("priority", "Medium")},
-                    "duedate": value.get("duedate"),
-                    "updated": value.get("updated"),
-                    "summary": value.get("summary", ""),
-                },
-            }
-            for key, value in self._issues.items()
-        ]
-        return self._summarize_issues(issues=issues, source="mock")
+            return self._build_sprint_summary_active()
+        return self._build_sprint_summary_mock()
 
     def get_recent_activity(self) -> list[dict[str, Any]]:
         """Return recent activity events."""
@@ -139,6 +115,181 @@ class JiraClient:
     @property
     def _is_active(self) -> bool:
         return self.config.mode.strip().lower() == "active"
+
+    def _build_sprint_summary_active(self) -> dict[str, Any]:
+        sprints = self._paginate(
+            path=f"/rest/agile/1.0/board/{self.config.board_id}/sprint?state=active,closed,future",
+            items_key="values",
+        )
+        selected_sprints = sprints[: self.config.sprint_limit]
+
+        sprint_payload: dict[str, dict[str, dict[str, Any]]] = {}
+        sprint_metrics: dict[str, dict[str, Any]] = {}
+        all_blockers: list[dict[str, Any]] = []
+        alerts: list[str] = []
+
+        for sprint in selected_sprints:
+            sprint_id = sprint.get("id")
+            sprint_name = sprint.get("name", f"Sprint-{sprint_id}")
+            issues = self._paginate(
+                path=(
+                    f"/rest/agile/1.0/sprint/{sprint_id}/issue?"
+                    "fields=summary,status,priority,assignee,duedate"
+                ),
+                items_key="issues",
+            )
+
+            sprint_tasks: dict[str, dict[str, Any]] = {}
+            done_count = 0
+            backlog_count = 0
+            in_progress_count = 0
+            blocked_count = 0
+
+            for issue in issues:
+                key = issue.get("key", "UNKNOWN")
+                fields = issue.get("fields", {})
+                status_name = fields.get("status", {}).get("name", "Unknown")
+                priority_name = (fields.get("priority") or {}).get("name")
+                assignee_name = (fields.get("assignee") or {}).get("displayName")
+                due_date = fields.get("duedate")
+
+                sprint_tasks[key] = {
+                    "summary": fields.get("summary"),
+                    "status": status_name,
+                    "priority": priority_name,
+                    "assignee": assignee_name,
+                    "duedate": due_date,
+                }
+
+                status_lower = status_name.lower()
+                if status_lower in {"done", "closed"}:
+                    done_count += 1
+                elif status_lower in {"to do", "backlog", "selected for development", "open"}:
+                    backlog_count += 1
+                else:
+                    in_progress_count += 1
+
+                is_blocked = status_lower in {"blocked", "impediment"}
+                if is_blocked:
+                    blocked_count += 1
+                    all_blockers.append({"sprint": sprint_name, "issue_key": key, "status": status_name})
+
+                is_open = status_lower not in {"done", "closed"}
+                if due_date and is_open:
+                    try:
+                        if date.fromisoformat(due_date) < date.today():
+                            alerts.append(f"Overdue issue in {sprint_name}: {key}")
+                    except ValueError:
+                        pass
+                if is_open and priority_name in {"Highest", "High", "Critical", "Blocker"} and not assignee_name:
+                    alerts.append(f"Unassigned high-priority issue in {sprint_name}: {key}")
+
+            total = len(issues)
+            completion_rate = round((done_count / total), 3) if total else 0.0
+            sprint_metrics[sprint_name] = {
+                "total_issues": total,
+                "done": done_count,
+                "backlog": backlog_count,
+                "in_progress": in_progress_count,
+                "blocked": blocked_count,
+                "completion_rate": completion_rate,
+                "state": sprint.get("state"),
+                "startDate": sprint.get("startDate"),
+                "endDate": sprint.get("endDate"),
+            }
+            sprint_payload[sprint_name] = sprint_tasks
+
+        closed_velocities = [
+            item["done"]
+            for item in sprint_metrics.values()
+            if str(item.get("state", "")).lower() == "closed"
+        ]
+        average_velocity = round(sum(closed_velocities) / len(closed_velocities), 2) if closed_velocities else 0.0
+
+        return {
+            "source": "atlassian_cloud",
+            "board_id": self.config.board_id,
+            "sprints": sprint_payload,
+            "sprint_metrics": sprint_metrics,
+            "velocity": {
+                "closed_sprint_count": len(closed_velocities),
+                "average_done_per_closed_sprint": average_velocity,
+                "last_closed_sprint_done": closed_velocities[-1] if closed_velocities else 0,
+            },
+            "blockers": all_blockers,
+            "alerts": alerts[:20],
+        }
+
+    def _build_sprint_summary_mock(self) -> dict[str, Any]:
+        sprint_name = "Sprint Mock"
+        sprint_tasks: dict[str, dict[str, Any]] = {}
+        done_count = 0
+
+        for key, value in self._issues.items():
+            status = value.get("status", "To Do")
+            sprint_tasks[key] = {
+                "summary": value.get("summary"),
+                "status": status,
+                "priority": value.get("priority"),
+                "assignee": value.get("assignee"),
+                "duedate": value.get("duedate"),
+            }
+            if str(status).lower() in {"done", "closed"}:
+                done_count += 1
+
+        total = len(sprint_tasks)
+        backlog = sum(
+            1
+            for item in sprint_tasks.values()
+            if str(item.get("status", "")).lower() in {"to do", "backlog", "open"}
+        )
+        in_progress = max(total - done_count - backlog, 0)
+
+        return {
+            "source": "mock",
+            "board_id": self.config.board_id,
+            "sprints": {sprint_name: sprint_tasks},
+            "sprint_metrics": {
+                sprint_name: {
+                    "total_issues": total,
+                    "done": done_count,
+                    "backlog": backlog,
+                    "in_progress": in_progress,
+                    "blocked": 0,
+                    "completion_rate": round((done_count / total), 3) if total else 0.0,
+                    "state": "active",
+                }
+            },
+            "velocity": {
+                "closed_sprint_count": 0,
+                "average_done_per_closed_sprint": 0.0,
+                "last_closed_sprint_done": 0,
+            },
+            "blockers": [],
+            "alerts": [],
+        }
+
+    def _paginate(self, path: str, items_key: str) -> list[dict[str, Any]]:
+        """Fetch paginated Jira endpoints that use startAt/maxResults/total."""
+        items: list[dict[str, Any]] = []
+        start_at = 0
+
+        while True:
+            separator = "&" if "?" in path else "?"
+            page = self._request_json("GET", f"{path}{separator}startAt={start_at}&maxResults=50")
+            batch = page.get(items_key, [])
+            if not isinstance(batch, list):
+                break
+            items.extend(batch)
+
+            returned = len(batch)
+            total = int(page.get("total", returned))
+            if returned == 0:
+                break
+            start_at += returned
+            if start_at >= total:
+                break
+        return items
 
     def _with_retry(self, op_name: str, operation: Any) -> Any:
         last_exc: Exception | None = None
@@ -240,47 +391,3 @@ class JiraClient:
         self._issues[issue_key]["status"] = status
         self._activity.append({"event": "transition", "issue_key": issue_key, "status": status})
         return self._issues[issue_key]
-
-    def _summarize_issues(self, issues: list[dict[str, Any]], source: str) -> dict[str, Any]:
-        status_counts: dict[str, int] = {}
-        priority_counts: dict[str, int] = {}
-        overdue_issues: list[str] = []
-        high_priority_open: list[str] = []
-
-        today = date.today()
-        for issue in issues:
-            key = issue.get("key", "UNKNOWN")
-            fields = issue.get("fields", {})
-
-            status = fields.get("status", {}).get("name", "Unknown")
-            priority = fields.get("priority", {}).get("name", "Unknown")
-            due_date = fields.get("duedate")
-
-            status_counts[status] = status_counts.get(status, 0) + 1
-            priority_counts[priority] = priority_counts.get(priority, 0) + 1
-
-            is_open = status not in {"Done", "Closed"}
-            if is_open and priority in {"Highest", "High", "Critical", "Blocker"}:
-                high_priority_open.append(key)
-
-            if due_date and is_open:
-                try:
-                    if date.fromisoformat(due_date) < today:
-                        overdue_issues.append(key)
-                except ValueError:
-                    pass
-
-        total_issues = len(issues)
-        open_issues = total_issues - status_counts.get("Done", 0) - status_counts.get("Closed", 0)
-
-        return {
-            "open_issues": open_issues,
-            "total_issues": total_issues,
-            "source": source,
-            "status_counts": status_counts,
-            "priority_counts": priority_counts,
-            "overdue_count": len(overdue_issues),
-            "overdue_issue_keys": overdue_issues[:5],
-            "high_priority_open_count": len(high_priority_open),
-            "high_priority_open_keys": high_priority_open[:5],
-        }

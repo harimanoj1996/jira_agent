@@ -28,6 +28,7 @@ JIRA_CONFIG = JiraClientConfig(
     email="your_email@company.com",
     api_token="your_api_token",
     project_key="LIFE",
+    board_id=1,
 )
 
 

@@ -19,7 +19,7 @@ def test_active_mode_requires_credentials() -> None:
         client._request_json("GET", "/rest/api/3/myself")
 
 
-def test_get_workload_summary_active_uses_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_workload_summary_active_returns_sprint_json(monkeypatch: pytest.MonkeyPatch) -> None:
     client = JiraClient(
         config=JiraClientConfig(
             mode="active",
@@ -27,31 +27,46 @@ def test_get_workload_summary_active_uses_rest(monkeypatch: pytest.MonkeyPatch) 
             email="a@b.com",
             api_token="token",
             project_key="ABC",
+            board_id=7,
         )
     )
 
     def fake_request(method: str, path: str, payload=None):
         del method, payload
-        if path.startswith("/rest/api/3/search/jql?"):
+        if path.startswith("/rest/agile/1.0/board/7/sprint"):
+            return {
+                "values": [{"id": 101, "name": "Sprint 1", "state": "active"}],
+                "startAt": 0,
+                "maxResults": 50,
+                "total": 1,
+            }
+        if path.startswith("/rest/agile/1.0/sprint/101/issue"):
             return {
                 "issues": [
                     {
                         "key": "ABC-1",
                         "fields": {
+                            "summary": "Login fix",
                             "status": {"name": "In Progress"},
                             "priority": {"name": "High"},
+                            "assignee": {"displayName": "Alex"},
                             "duedate": "2000-01-01",
                         },
                     },
                     {
                         "key": "ABC-2",
                         "fields": {
+                            "summary": "Refactor auth",
                             "status": {"name": "Done"},
                             "priority": {"name": "Low"},
+                            "assignee": None,
                             "duedate": None,
                         },
                     },
-                ]
+                ],
+                "startAt": 0,
+                "maxResults": 50,
+                "total": 2,
             }
         raise AssertionError(f"Unexpected path: {path}")
 
@@ -63,11 +78,10 @@ def test_get_workload_summary_active_uses_rest(monkeypatch: pytest.MonkeyPatch) 
     result = client.get_workload_summary()
 
     assert result["source"] == "atlassian_cloud"
-    assert result["open_issues"] == 1
-    assert result["total_issues"] == 2
-    assert result["status_counts"]["In Progress"] == 1
-    assert result["overdue_count"] == 1
-    assert result["high_priority_open_count"] == 1
+    assert "Sprint 1" in result["sprints"]
+    assert result["sprints"]["Sprint 1"]["ABC-1"]["status"] == "In Progress"
+    assert result["sprint_metrics"]["Sprint 1"]["done"] == 1
+    assert result["alerts"]
 
 
 def test_get_recent_activity_active_uses_issue_updates(monkeypatch: pytest.MonkeyPatch) -> None:
